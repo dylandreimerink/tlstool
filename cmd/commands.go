@@ -37,9 +37,11 @@ const dateFormat = "15:04:05 02-01-2006"
 
 var (
 	//Private key variables
-	KeyType    string
-	ecKeySize  int
-	rsaKeySize int
+	keyTypeFlag       string
+	ecKeySize         int
+	rsaKeySize        int
+	keyPassphrase     string
+	keyEncryptionType string
 
 	keyUsage = []struct {
 		Enabled bool
@@ -98,18 +100,21 @@ var (
 	certificateFilename string
 	keyFilename         string
 
-	parentCertificateFilename string
-	parentPrivateKeyFilename  string
+	parentCertificateFilename  string
+	parentPrivateKeyFilename   string
+	parentPrivateKeyPassphrase string
 )
 
 func init() {
 	flags := rootCmd.Flags()
 
 	keyFlags := pflag.NewFlagSet("key-flags", pflag.ContinueOnError)
-	keyFlags.StringVar(&KeyType, "key-type", "RSA", "The type of private key to be generated. Can be RSA or EC")
+	keyFlags.StringVar(&keyTypeFlag, "key-type", "RSA", "The type of private key to be generated. Can be RSA or EC")
 	keyFlags.IntVar(&ecKeySize, "ec-key-size", 256, "The bit size of the EC key. Allowed values: 224, 256, 384 and 521")
 	keyFlags.IntVar(&rsaKeySize, "rsa-key-size", 4096, "The bit size of the RSA key. Allowed values: 1024, 2048, 4096, 8192")
 	keyFlags.StringVar(&keyFilename, "key-output", "certificate.key", "The path and filename where the key will be writen to")
+	keyFlags.StringVar(&keyPassphrase, "key-passphrase", "", "If specified this passphrase will be used to encrypt the generated private key")
+	keyFlags.StringVar(&keyEncryptionType, "key-encryption-type", "AES256", "The cipher type used to encrypt the private key. Valid values: DES, 3DES, AES128, AES192, AES256")
 	flags.AddFlagSet(keyFlags)
 
 	keyUsageFlags := pflag.NewFlagSet("key-usage-flags", pflag.ContinueOnError)
@@ -148,6 +153,7 @@ func init() {
 	certFlags.IntVar(&validFor, "valid-for", 365*5, "For how many days the certificate is valid")
 	certFlags.StringVar(&parentCertificateFilename, "parent-cert", "", "The path to the parent certificate which will be used to sign the generated certificate")
 	certFlags.StringVar(&parentPrivateKeyFilename, "parent-key", "", "The path to the private key of the certificate which will be used to sign the generated certificate")
+	certFlags.StringVar(&parentPrivateKeyPassphrase, "parent-key-passphrase", "", "The passphrase used to decrypt the parent private key")
 	certFlags.BoolVar(&isCA, "is-ca", false, "If set a CA certificate will be created, meaning it can sign other certificates")
 	certFlags.IntVar(&maxPathLength, "max-path-length", -1, "The maximum size of the subtree of this certificate. https://stackoverflow.com/questions/6616470/certificates-basic-constraints-path-length")
 	certFlags.StringSliceVar(&ocspServers, "ocsp-server", []string{}, "The OCSP URI for this certificate. https://en.wikipedia.org/wiki/Online_Certificate_Status_Protocol")
@@ -226,7 +232,7 @@ func genCertificate(cmd *cobra.Command, args []string) error {
 			return err
 		}
 
-		parentKey, err = pemFileToKey(parentPrivateKeyFilename)
+		parentKey, err = pemFileToKey(parentPrivateKeyFilename, []byte(parentPrivateKeyPassphrase))
 		if err != nil {
 			return err
 		}
@@ -236,12 +242,28 @@ func genCertificate(cmd *cobra.Command, args []string) error {
 		return errors.New("Both parent-cert and parent-key should be set or neither should be set")
 	}
 
-	keyType := strings.ToLower(KeyType)
+	keyType := strings.ToLower(keyTypeFlag)
 
 	var (
-		ecKey  *ecdsa.PrivateKey
-		rsaKey *rsa.PrivateKey
+		ecKey            *ecdsa.PrivateKey
+		rsaKey           *rsa.PrivateKey
+		encryptionCipher x509.PEMCipher
 	)
+
+	switch strings.ToLower(keyEncryptionType) {
+	case "des":
+		encryptionCipher = x509.PEMCipherDES
+	case "3des":
+		encryptionCipher = x509.PEMCipher3DES
+	case "aes128":
+		encryptionCipher = x509.PEMCipherAES128
+	case "aes192":
+		encryptionCipher = x509.PEMCipherAES192
+	case "aes256":
+		encryptionCipher = x509.PEMCipherAES256
+	default:
+		return errors.Errorf("Unknown encryption type: %s", keyEncryptionType)
+	}
 
 	if keyType == "ec" {
 		ecKey, err = generateECPrivateKey(ecKeySize)
@@ -249,17 +271,17 @@ func genCertificate(cmd *cobra.Command, args []string) error {
 			return err
 		}
 
-		if err := ecKeyToFile(keyFilename, ecKey); err != nil {
+		if err := ecKeyToFile(keyFilename, ecKey, []byte(keyPassphrase), encryptionCipher); err != nil {
 			return err
 		}
 	} else if keyType == "rsa" {
 		rsaKey, err = generateRSAPriveKey(rsaKeySize)
 
-		if err := rsaKeyToFile(keyFilename, rsaKey); err != nil {
+		if err := rsaKeyToFile(keyFilename, rsaKey, []byte(keyPassphrase), encryptionCipher); err != nil {
 			return err
 		}
 	} else {
-		return errors.Errorf("%s is not a valid value for key-type, valid values: RSA and EC\n", KeyType)
+		return errors.Errorf("%s is not a valid value for key-type, valid values: RSA and EC\n", keyTypeFlag)
 	}
 
 	notBefore, err := time.Parse(dateFormat, validFrom)

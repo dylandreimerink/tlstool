@@ -11,16 +11,18 @@ Using Go tools:
 
 ## Usage
 
-```shell
+```text
 Usage:
   tlstool [flags]
 
 Flags:
 Private key flags:
-      --ec-key-size int     The bit size of the EC key. Allowed values: 224, 256, 384 and 521 (default 256)
-      --key-output string   The path and filename where the key will be writen to (default "certificate.key")
-      --key-type string     The type of private key to be generated. Can be RSA or EC (default "RSA")
-      --rsa-key-size int    The bit size of the RSA key. Allowed values: 1024, 2048, 4096, 8192 (default 4096)
+      --ec-key-size int              The bit size of the EC key. Allowed values: 224, 256, 384 and 521 (default 256)
+      --key-encryption-type string   The cipher type used to encrypt the private key. Valid values: DES, 3DES, AES128, AES192, AES256 (default "AES256")
+      --key-output string            The path and filename where the key will be writen to (default "certificate.key")
+      --key-passphrase string        If specified this passphrase will be used to encrypt the generated private key
+      --key-type string              The type of private key to be generated. Can be RSA or EC (default "RSA")
+      --rsa-key-size int             The bit size of the RSA key. Allowed values: 1024, 2048, 4096, 8192 (default 4096)
 
 Certificate flags:
       --cert-output string               The path and filename where the certificate will be writen to (default "certificate.crt")
@@ -31,8 +33,9 @@ Certificate flags:
       --ocsp-server strings              The OCSP URI for this certificate. https://en.wikipedia.org/wiki/Online_Certificate_Status_Protocol
       --parent-cert string               The path to the parent certificate which will be used to sign the generated certificate
       --parent-key string                The path to the private key of the certificate which will be used to sign the generated certificate
+      --parent-key-passphrase string     The passphrase used to decrypt the parent private key
       --valid-for int                    For how many days the certificate is valid (default 1825)
-      --valid-from string                The date and time after which the certificate is valid (default "13:43:15 22-04-2019")
+      --valid-from string                The date and time after which the certificate is valid (default "19:37:34 22-04-2019")
 
 Certificate subject flags:
       --common-name string             The common name of the certificate
@@ -81,7 +84,8 @@ Extended key usage flags:
 
 ## Wishlist
 
-- [ ] Support for encrypted private keys
+- [X] Support for encrypted private keys
+- [ ] Support for name constraints
 - [ ] Interactive wizard for cert and key generation
 - [ ] Security warnings (when using small bit sizes for example)
 - [ ] Mistake warnings (generating certificates without common names for example)

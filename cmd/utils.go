@@ -15,7 +15,7 @@ import (
 )
 
 // ecKeyToFile serializes the EC key and writes it to a file
-func ecKeyToFile(filename string, key *ecdsa.PrivateKey) error {
+func ecKeyToFile(filename string, key *ecdsa.PrivateKey, passphrase []byte, encryptionAlgorithm x509.PEMCipher) error {
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
@@ -27,7 +27,16 @@ func ecKeyToFile(filename string, key *ecdsa.PrivateKey) error {
 		return errors.Errorf("Unable to marshal ECDSA private key: %v", err)
 	}
 
-	if err := pem.Encode(file, &pem.Block{Type: "EC PRIVATE KEY", Bytes: b}); err != nil {
+	block := &pem.Block{Type: "EC PRIVATE KEY", Bytes: b}
+
+	if len(passphrase) > 0 {
+		block, err = x509.EncryptPEMBlock(rand.Reader, "EC PRIVATE KEY", b, passphrase, encryptionAlgorithm)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := pem.Encode(file, block); err != nil {
 		return err
 	}
 
@@ -35,7 +44,7 @@ func ecKeyToFile(filename string, key *ecdsa.PrivateKey) error {
 }
 
 // rsaKeyToFile serializes the EC key and writes it to a file
-func rsaKeyToFile(filename string, key *rsa.PrivateKey) error {
+func rsaKeyToFile(filename string, key *rsa.PrivateKey, passphrase []byte, encryptionAlgorithm x509.PEMCipher) error {
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
@@ -43,7 +52,17 @@ func rsaKeyToFile(filename string, key *rsa.PrivateKey) error {
 	defer file.Close()
 
 	b := x509.MarshalPKCS1PrivateKey(key)
-	if err := pem.Encode(file, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: b}); err != nil {
+
+	block := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: b}
+
+	if len(passphrase) > 0 {
+		block, err = x509.EncryptPEMBlock(rand.Reader, "RSA PRIVATE KEY", b, passphrase, encryptionAlgorithm)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := pem.Encode(file, block); err != nil {
 		return err
 	}
 
@@ -95,7 +114,7 @@ func pemFileToCert(filename string) (*x509.Certificate, error) {
 	return cert, nil
 }
 
-func pemFileToKey(filename string) (interface{}, error) {
+func pemFileToKey(filename string, passphrase []byte) (interface{}, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -111,14 +130,25 @@ func pemFileToKey(filename string) (interface{}, error) {
 		return nil, errors.New("Can't read PEM data")
 	}
 
-	//TODO handle encrypted pem
+	derBytes := block.Bytes
+
+	if x509.IsEncryptedPEMBlock(block) {
+		if len(passphrase) == 0 {
+			return nil, errors.New("Key file is encrypted but no passphrase provided")
+		}
+
+		derBytes, err = x509.DecryptPEMBlock(block, passphrase)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	var key interface{}
 
 	if block.Type == "RSA PRIVATE KEY" {
-		key, err = x509.ParsePKCS1PrivateKey(block.Bytes)
+		key, err = x509.ParsePKCS1PrivateKey(derBytes)
 	} else if block.Type == "EC PRIVATE KEY" {
-		key, err = x509.ParseECPrivateKey(block.Bytes)
+		key, err = x509.ParseECPrivateKey(derBytes)
 	} else {
 		return nil, errors.Errorf("Unknown private key type: %s", block.Type)
 	}
