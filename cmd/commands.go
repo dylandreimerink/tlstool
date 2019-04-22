@@ -21,8 +21,8 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "tlstool",
-	Short: "TLSTool is a cli tool to easily generate TLS certificates",
-	Long:  "TLSTool is a cli tool to easily generate TLS certificates without configuration files or having to setup a full PKI infrastructure",
+	Short: "TLSTool is a cli tool to easily generate X.509 certificates which can be used for TLS connections",
+	Long:  "TLSTool is a cli tool to easily generate X.509 certificates which can be used for TLS connections without configuration files or having to setup a full PKI infrastructure",
 	RunE:  genCertificate,
 }
 
@@ -38,10 +38,10 @@ const dateFormat = "15:04:05 02-01-2006"
 var (
 	//Private key variables
 	KeyType    string
-	ECKeySize  int
-	RSAKeySize int
+	ecKeySize  int
+	rsaKeySize int
 
-	KeyUsage = []struct {
+	keyUsage = []struct {
 		Enabled bool
 		Bit     x509.KeyUsage
 	}{
@@ -56,7 +56,7 @@ var (
 		{Bit: x509.KeyUsageDecipherOnly},
 	}
 
-	ExtendedKeyUsage = []struct {
+	extendedKeyUsage = []struct {
 		Enabled bool
 		Usage   x509.ExtKeyUsage
 	}{
@@ -77,29 +77,29 @@ var (
 	}
 
 	//Certificate variables
-	ValidFrom              string
-	ValidFor               int
+	validFrom              string
+	validFor               int
 	isCA                   bool
 	maxPathLength          int
 	ocspServers            []string
 	issuingCertificateURLs []string
 	crlDistributionPoints  []string
 
-	Country, Organization, OrganizationalUnit []string
-	Locality, Province                        []string
-	StreetAddress, PostalCode                 []string
-	SerialNumber, CommonName                  string
+	country, organization, organizationalUnit []string
+	locality, province                        []string
+	streetAddress, postalCode                 []string
+	subjectSerialNumber, commonName           string
 
 	ipAddresses    []net.IP
 	emailAddresses []string
 	domainNames    []string
 	uris           []string
 
-	CertificateFilename string
-	KeyFilename         string
+	certificateFilename string
+	keyFilename         string
 
-	ParentCertificate string
-	ParentPrivateKey  string
+	parentCertificateFilename string
+	parentPrivateKeyFilename  string
 )
 
 func init() {
@@ -107,47 +107,47 @@ func init() {
 
 	keyFlags := pflag.NewFlagSet("key-flags", pflag.ContinueOnError)
 	keyFlags.StringVar(&KeyType, "key-type", "RSA", "The type of private key to be generated. Can be RSA or EC")
-	keyFlags.IntVar(&ECKeySize, "ec-key-size", 256, "The bit size of the EC key. Allowed values: 224, 256, 384 and 521")
-	keyFlags.IntVar(&RSAKeySize, "rsa-key-size", 4096, "The bit size of the RSA key. Allowed values: 1024, 2048, 4096, 8192")
-	keyFlags.StringVar(&KeyFilename, "key-output", "certificate.key", "The path and filename where the key will be writen to")
+	keyFlags.IntVar(&ecKeySize, "ec-key-size", 256, "The bit size of the EC key. Allowed values: 224, 256, 384 and 521")
+	keyFlags.IntVar(&rsaKeySize, "rsa-key-size", 4096, "The bit size of the RSA key. Allowed values: 1024, 2048, 4096, 8192")
+	keyFlags.StringVar(&keyFilename, "key-output", "certificate.key", "The path and filename where the key will be writen to")
 	flags.AddFlagSet(keyFlags)
 
 	keyUsageFlags := pflag.NewFlagSet("key-usage-flags", pflag.ContinueOnError)
-	keyUsageFlags.BoolVar(&KeyUsage[0].Enabled, "key-usage-digital-signature", false, "Use when the public key is used with a digital signature mechanism to support security services other than non-repudiation, certificate signing, or CRL signing. A digital signature is often used for entity authentication and data origin authentication with integrity.")
-	keyUsageFlags.BoolVar(&KeyUsage[1].Enabled, "key-usage-content-commitment", false, "Use when the public key is used to verify digital signatures used to provide a non-repudiation service. Non-repudiation protects against the signing entity falsely denying some action (excluding certificate or CRL signing).")
-	keyUsageFlags.BoolVar(&KeyUsage[2].Enabled, "key-usage-key-encipherment", false, "Use when a certificate will be used with a protocol that encrypts keys. An example is S/MIME enveloping, where a fast (symmetric) key is encrypted with the public key from the certificate. SSL protocol also performs key encipherment.")
-	keyUsageFlags.BoolVar(&KeyUsage[3].Enabled, "key-usage-data-encipherment", false, "Use when the public key is used for encrypting user data, other than cryptographic keys.")
-	keyUsageFlags.BoolVar(&KeyUsage[4].Enabled, "key-usage-key-agreement", false, "Use when the sender and receiver of the public key need to derive the key without using encryption. This key can then can be used to encrypt messages between the sender and receiver. Key agreement is typically used with Diffie-Hellman ciphers.")
-	keyUsageFlags.BoolVar(&KeyUsage[5].Enabled, "key-usage-cert-sign", false, "Use when the subject public key is used to verify a signature on certificates. This extension can be used only in CA certificates.")
-	keyUsageFlags.BoolVar(&KeyUsage[6].Enabled, "key-usage-crl-sign", false, "Use when the subject public key is to verify a signature on revocation information, such as a CRL.")
-	keyUsageFlags.BoolVar(&KeyUsage[7].Enabled, "key-usage-encipher-only", false, "Use only when key agreement is also enabled. This enables the public key to be used only for enciphering data while performing key agreement.")
-	keyUsageFlags.BoolVar(&KeyUsage[8].Enabled, "key-usage-decipher-only", false, "Use only when key agreement is also enabled. This enables the public key to be used only for deciphering data while performing key agreement.")
+	keyUsageFlags.BoolVar(&keyUsage[0].Enabled, "key-usage-digital-signature", false, "Use when the public key is used with a digital signature mechanism to support security services other than non-repudiation, certificate signing, or CRL signing. A digital signature is often used for entity authentication and data origin authentication with integrity.")
+	keyUsageFlags.BoolVar(&keyUsage[1].Enabled, "key-usage-content-commitment", false, "Use when the public key is used to verify digital signatures used to provide a non-repudiation service. Non-repudiation protects against the signing entity falsely denying some action (excluding certificate or CRL signing).")
+	keyUsageFlags.BoolVar(&keyUsage[2].Enabled, "key-usage-key-encipherment", false, "Use when a certificate will be used with a protocol that encrypts keys. An example is S/MIME enveloping, where a fast (symmetric) key is encrypted with the public key from the certificate. SSL protocol also performs key encipherment.")
+	keyUsageFlags.BoolVar(&keyUsage[3].Enabled, "key-usage-data-encipherment", false, "Use when the public key is used for encrypting user data, other than cryptographic keys.")
+	keyUsageFlags.BoolVar(&keyUsage[4].Enabled, "key-usage-key-agreement", false, "Use when the sender and receiver of the public key need to derive the key without using encryption. This key can then can be used to encrypt messages between the sender and receiver. Key agreement is typically used with Diffie-Hellman ciphers.")
+	keyUsageFlags.BoolVar(&keyUsage[5].Enabled, "key-usage-cert-sign", false, "Use when the subject public key is used to verify a signature on certificates. This extension can be used only in CA certificates.")
+	keyUsageFlags.BoolVar(&keyUsage[6].Enabled, "key-usage-crl-sign", false, "Use when the subject public key is to verify a signature on revocation information, such as a CRL.")
+	keyUsageFlags.BoolVar(&keyUsage[7].Enabled, "key-usage-encipher-only", false, "Use only when key agreement is also enabled. This enables the public key to be used only for enciphering data while performing key agreement.")
+	keyUsageFlags.BoolVar(&keyUsage[8].Enabled, "key-usage-decipher-only", false, "Use only when key agreement is also enabled. This enables the public key to be used only for deciphering data while performing key agreement.")
 	flags.AddFlagSet(keyUsageFlags)
 
 	extendedKeyUsageFlags := pflag.NewFlagSet("extended-key-usage-flags", pflag.ContinueOnError)
 	//TODO add description
-	extendedKeyUsageFlags.BoolVar(&ExtendedKeyUsage[0].Enabled, "ext-key-usage-any", false, "")
-	extendedKeyUsageFlags.BoolVar(&ExtendedKeyUsage[1].Enabled, "ext-key-usage-server-auth", false, "")
-	extendedKeyUsageFlags.BoolVar(&ExtendedKeyUsage[2].Enabled, "ext-key-usage-client-auth", false, "")
-	extendedKeyUsageFlags.BoolVar(&ExtendedKeyUsage[3].Enabled, "ext-key-usage-code-signing", false, "")
-	extendedKeyUsageFlags.BoolVar(&ExtendedKeyUsage[4].Enabled, "ext-key-usage-email-protection", false, "")
-	extendedKeyUsageFlags.BoolVar(&ExtendedKeyUsage[5].Enabled, "ext-key-usage-ipsec-end-system", false, "")
-	extendedKeyUsageFlags.BoolVar(&ExtendedKeyUsage[6].Enabled, "ext-key-usage-ipsec-tunnel", false, "")
-	extendedKeyUsageFlags.BoolVar(&ExtendedKeyUsage[7].Enabled, "ext-key-usage-ipsec-user", false, "")
-	extendedKeyUsageFlags.BoolVar(&ExtendedKeyUsage[8].Enabled, "ext-key-usage-time-stamping", false, "")
-	extendedKeyUsageFlags.BoolVar(&ExtendedKeyUsage[9].Enabled, "ext-key-usage-ocsp-signing", false, "")
-	extendedKeyUsageFlags.BoolVar(&ExtendedKeyUsage[10].Enabled, "ext-key-usage-microsoft-server-gated-crypto", false, "")
-	extendedKeyUsageFlags.BoolVar(&ExtendedKeyUsage[11].Enabled, "ext-key-usage-netscape-server-gated-crypto", false, "")
-	extendedKeyUsageFlags.BoolVar(&ExtendedKeyUsage[12].Enabled, "ext-key-usage-microsoft-commercial-code-signing", false, "")
-	extendedKeyUsageFlags.BoolVar(&ExtendedKeyUsage[13].Enabled, "ext-key-usage-microsoft-kernel-code-signing", false, "")
+	extendedKeyUsageFlags.BoolVar(&extendedKeyUsage[0].Enabled, "ext-key-usage-any", false, "")
+	extendedKeyUsageFlags.BoolVar(&extendedKeyUsage[1].Enabled, "ext-key-usage-server-auth", false, "")
+	extendedKeyUsageFlags.BoolVar(&extendedKeyUsage[2].Enabled, "ext-key-usage-client-auth", false, "")
+	extendedKeyUsageFlags.BoolVar(&extendedKeyUsage[3].Enabled, "ext-key-usage-code-signing", false, "")
+	extendedKeyUsageFlags.BoolVar(&extendedKeyUsage[4].Enabled, "ext-key-usage-email-protection", false, "")
+	extendedKeyUsageFlags.BoolVar(&extendedKeyUsage[5].Enabled, "ext-key-usage-ipsec-end-system", false, "")
+	extendedKeyUsageFlags.BoolVar(&extendedKeyUsage[6].Enabled, "ext-key-usage-ipsec-tunnel", false, "")
+	extendedKeyUsageFlags.BoolVar(&extendedKeyUsage[7].Enabled, "ext-key-usage-ipsec-user", false, "")
+	extendedKeyUsageFlags.BoolVar(&extendedKeyUsage[8].Enabled, "ext-key-usage-time-stamping", false, "")
+	extendedKeyUsageFlags.BoolVar(&extendedKeyUsage[9].Enabled, "ext-key-usage-ocsp-signing", false, "")
+	extendedKeyUsageFlags.BoolVar(&extendedKeyUsage[10].Enabled, "ext-key-usage-microsoft-server-gated-crypto", false, "")
+	extendedKeyUsageFlags.BoolVar(&extendedKeyUsage[11].Enabled, "ext-key-usage-netscape-server-gated-crypto", false, "")
+	extendedKeyUsageFlags.BoolVar(&extendedKeyUsage[12].Enabled, "ext-key-usage-microsoft-commercial-code-signing", false, "")
+	extendedKeyUsageFlags.BoolVar(&extendedKeyUsage[13].Enabled, "ext-key-usage-microsoft-kernel-code-signing", false, "")
 	flags.AddFlagSet(extendedKeyUsageFlags)
 
 	certFlags := pflag.NewFlagSet("cert-flags", pflag.ContinueOnError)
-	certFlags.StringVar(&CertificateFilename, "cert-output", "certificate.crt", "The path and filename where the certificate will be writen to")
-	certFlags.StringVar(&ValidFrom, "valid-from", time.Now().Format(dateFormat), "The date and time after which the certificate is valid")
-	certFlags.IntVar(&ValidFor, "valid-for", 365*5, "For how many days the certificate is valid")
-	certFlags.StringVar(&ParentCertificate, "parent-cert", "", "The path to the parent certificate which will be used to sign the generated certificate")
-	certFlags.StringVar(&ParentPrivateKey, "parent-key", "", "The path to the private key of the certificate which will be used to sign the generated certificate")
+	certFlags.StringVar(&certificateFilename, "cert-output", "certificate.crt", "The path and filename where the certificate will be writen to")
+	certFlags.StringVar(&validFrom, "valid-from", time.Now().Format(dateFormat), "The date and time after which the certificate is valid")
+	certFlags.IntVar(&validFor, "valid-for", 365*5, "For how many days the certificate is valid")
+	certFlags.StringVar(&parentCertificateFilename, "parent-cert", "", "The path to the parent certificate which will be used to sign the generated certificate")
+	certFlags.StringVar(&parentPrivateKeyFilename, "parent-key", "", "The path to the private key of the certificate which will be used to sign the generated certificate")
 	certFlags.BoolVar(&isCA, "is-ca", false, "If set a CA certificate will be created, meaning it can sign other certificates")
 	certFlags.IntVar(&maxPathLength, "max-path-length", -1, "The maximum size of the subtree of this certificate. https://stackoverflow.com/questions/6616470/certificates-basic-constraints-path-length")
 	certFlags.StringSliceVar(&ocspServers, "ocsp-server", []string{}, "The OCSP URI for this certificate. https://en.wikipedia.org/wiki/Online_Certificate_Status_Protocol")
@@ -156,15 +156,15 @@ func init() {
 	flags.AddFlagSet(certFlags)
 
 	certSubjectFlags := pflag.NewFlagSet("cert-subject-flags", pflag.ContinueOnError)
-	certSubjectFlags.StringSliceVar(&Country, "country", []string{}, "The country(s) of the subject of the certificate")
-	certSubjectFlags.StringSliceVar(&Organization, "organization", []string{}, "The organization(s) of the subject of the certificate")
-	certSubjectFlags.StringSliceVar(&OrganizationalUnit, "organizational-unit", []string{}, "The organizational units(s) of the subject of the certificate")
-	certSubjectFlags.StringSliceVar(&Locality, "locality", []string{}, "The locality(s) of the subject of the certificate")
-	certSubjectFlags.StringSliceVar(&Province, "province", []string{}, "The province(s) of the subject of the certificate")
-	certSubjectFlags.StringSliceVar(&StreetAddress, "street-address", []string{}, "The street address(s) of the subject of the certificate")
-	certSubjectFlags.StringSliceVar(&PostalCode, "postal-code", []string{}, "The postal code(s) of the subject of the certificate")
-	certSubjectFlags.StringVar(&SerialNumber, "subject-serial-number", "", "The serial number of the subject of the certificate")
-	certSubjectFlags.StringVar(&CommonName, "common-name", "", "The common name of the certificate")
+	certSubjectFlags.StringSliceVar(&country, "country", []string{}, "The country(s) of the subject of the certificate")
+	certSubjectFlags.StringSliceVar(&organization, "organization", []string{}, "The organization(s) of the subject of the certificate")
+	certSubjectFlags.StringSliceVar(&organizationalUnit, "organizational-unit", []string{}, "The organizational units(s) of the subject of the certificate")
+	certSubjectFlags.StringSliceVar(&locality, "locality", []string{}, "The locality(s) of the subject of the certificate")
+	certSubjectFlags.StringSliceVar(&province, "province", []string{}, "The province(s) of the subject of the certificate")
+	certSubjectFlags.StringSliceVar(&streetAddress, "street-address", []string{}, "The street address(s) of the subject of the certificate")
+	certSubjectFlags.StringSliceVar(&postalCode, "postal-code", []string{}, "The postal code(s) of the subject of the certificate")
+	certSubjectFlags.StringVar(&subjectSerialNumber, "subject-serial-number", "", "The serial number of the subject of the certificate")
+	certSubjectFlags.StringVar(&commonName, "common-name", "", "The common name of the certificate")
 	flags.AddFlagSet(certSubjectFlags)
 
 	certUsageFlags := pflag.NewFlagSet("cert-usage-flags", pflag.ContinueOnError)
@@ -220,19 +220,19 @@ func genCertificate(cmd *cobra.Command, args []string) error {
 		hasParent         bool
 	)
 
-	if ParentCertificate != "" && ParentPrivateKey != "" {
-		parentCertificate, err = pemFileToCert(ParentCertificate)
+	if parentCertificateFilename != "" && parentPrivateKeyFilename != "" {
+		parentCertificate, err = pemFileToCert(parentCertificateFilename)
 		if err != nil {
 			return err
 		}
 
-		parentKey, err = pemFileToKey(ParentPrivateKey)
+		parentKey, err = pemFileToKey(parentPrivateKeyFilename)
 		if err != nil {
 			return err
 		}
 
 		hasParent = true
-	} else if ParentCertificate != "" || ParentPrivateKey != "" {
+	} else if parentCertificateFilename != "" || parentPrivateKeyFilename != "" {
 		return errors.New("Both parent-cert and parent-key should be set or neither should be set")
 	}
 
@@ -244,25 +244,25 @@ func genCertificate(cmd *cobra.Command, args []string) error {
 	)
 
 	if keyType == "ec" {
-		ecKey, err = generateECPrivateKey(ECKeySize)
+		ecKey, err = generateECPrivateKey(ecKeySize)
 		if err != nil {
 			return err
 		}
 
-		if err := ecKeyToFile(KeyFilename, ecKey); err != nil {
+		if err := ecKeyToFile(keyFilename, ecKey); err != nil {
 			return err
 		}
 	} else if keyType == "rsa" {
-		rsaKey, err = generateRSAPriveKey(RSAKeySize)
+		rsaKey, err = generateRSAPriveKey(rsaKeySize)
 
-		if err := rsaKeyToFile(KeyFilename, rsaKey); err != nil {
+		if err := rsaKeyToFile(keyFilename, rsaKey); err != nil {
 			return err
 		}
 	} else {
 		return errors.Errorf("%s is not a valid value for key-type, valid values: RSA and EC\n", KeyType)
 	}
 
-	notBefore, err := time.Parse(dateFormat, ValidFrom)
+	notBefore, err := time.Parse(dateFormat, validFrom)
 	if err != nil {
 		return err
 	}
@@ -274,14 +274,14 @@ func genCertificate(cmd *cobra.Command, args []string) error {
 	}
 
 	var keyUsageCompiled x509.KeyUsage
-	for _, flag := range KeyUsage {
+	for _, flag := range keyUsage {
 		if flag.Enabled {
 			keyUsageCompiled |= flag.Bit
 		}
 	}
 
 	var extendedKeyUsageCompiled []x509.ExtKeyUsage
-	for _, flag := range ExtendedKeyUsage {
+	for _, flag := range extendedKeyUsage {
 		if flag.Enabled {
 			extendedKeyUsageCompiled = append(extendedKeyUsageCompiled, flag.Usage)
 		}
@@ -297,20 +297,20 @@ func genCertificate(cmd *cobra.Command, args []string) error {
 		urisCompiled = append(urisCompiled, newURI)
 	}
 
-	intermediateTemplate := x509.Certificate{
+	certificateTemplate := x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			Country:            Country,
-			Organization:       Organization,
-			OrganizationalUnit: OrganizationalUnit,
-			Locality:           Locality,
-			Province:           Province,
-			StreetAddress:      StreetAddress,
-			SerialNumber:       SerialNumber,
-			CommonName:         CommonName,
+			Country:            country,
+			Organization:       organization,
+			OrganizationalUnit: organizationalUnit,
+			Locality:           locality,
+			Province:           province,
+			StreetAddress:      streetAddress,
+			SerialNumber:       subjectSerialNumber,
+			CommonName:         commonName,
 		},
 		NotBefore:             notBefore,
-		NotAfter:              notBefore.AddDate(0, 0, ValidFor),
+		NotAfter:              notBefore.AddDate(0, 0, validFor),
 		KeyUsage:              keyUsageCompiled,
 		ExtKeyUsage:           extendedKeyUsageCompiled,
 		BasicConstraintsValid: true,
@@ -327,7 +327,7 @@ func genCertificate(cmd *cobra.Command, args []string) error {
 	}
 
 	if !hasParent {
-		parentCertificate = &intermediateTemplate
+		parentCertificate = &certificateTemplate
 
 		if keyType == "ec" {
 			parentKey = ecKey
@@ -338,16 +338,16 @@ func genCertificate(cmd *cobra.Command, args []string) error {
 
 	var derBytes []byte
 	if keyType == "ec" {
-		derBytes, err = x509.CreateCertificate(rand.Reader, &intermediateTemplate, parentCertificate, &ecKey.PublicKey, parentKey)
+		derBytes, err = x509.CreateCertificate(rand.Reader, &certificateTemplate, parentCertificate, &ecKey.PublicKey, parentKey)
 	} else {
-		derBytes, err = x509.CreateCertificate(rand.Reader, &intermediateTemplate, parentCertificate, rsaKey.Public(), parentKey)
+		derBytes, err = x509.CreateCertificate(rand.Reader, &certificateTemplate, parentCertificate, rsaKey.Public(), parentKey)
 	}
 
 	if err != nil {
 		return err
 	}
 
-	if err := certToFile(CertificateFilename, derBytes); err != nil {
+	if err := certToFile(certificateFilename, derBytes); err != nil {
 		return err
 	}
 
