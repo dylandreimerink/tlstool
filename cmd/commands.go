@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
@@ -23,7 +24,18 @@ var rootCmd = &cobra.Command{
 	Use:   "tlstool",
 	Short: "TLSTool is a cli tool to easily generate X.509 certificates which can be used for TLS connections",
 	Long:  "TLSTool is a cli tool to easily generate X.509 certificates which can be used for TLS connections without configuration files or having to setup a full PKI infrastructure",
+}
+
+var genCertCmd = &cobra.Command{
+	Use:   "gencert",
+	Short: "Generate a certificate and private key from the flags",
 	RunE:  genCertificate,
+}
+
+var genCsrCmd = &cobra.Command{
+	Use:   "gencsr",
+	Short: "Generate a certificate signing request from a existing certificate",
+	RunE:  genCertificateSigningRequest,
 }
 
 func Execute() {
@@ -79,13 +91,14 @@ var (
 	}
 
 	//Certificate variables
-	validFrom              string
-	validFor               int
-	isCA                   bool
-	maxPathLength          int
-	ocspServers            []string
-	issuingCertificateURLs []string
-	crlDistributionPoints  []string
+	validFrom                 string
+	validFor                  int
+	isCA                      bool
+	maxPathLength             int
+	ocspServers               []string
+	issuingCertificateURLs    []string
+	crlDistributionPoints     []string
+	certificateSigningRequest string
 
 	country, organization, organizationalUnit []string
 	locality, province                        []string
@@ -106,7 +119,14 @@ var (
 )
 
 func init() {
-	flags := rootCmd.Flags()
+	initGenCertCmd()
+	initGenCsr()
+}
+
+func initGenCertCmd() {
+	rootCmd.AddCommand(genCertCmd)
+
+	flags := genCertCmd.Flags()
 
 	keyFlags := pflag.NewFlagSet("key-flags", pflag.ContinueOnError)
 	keyFlags.StringVar(&keyTypeFlag, "key-type", "RSA", "The type of private key to be generated. Can be RSA or EC")
@@ -159,6 +179,7 @@ func init() {
 	certFlags.StringSliceVar(&ocspServers, "ocsp-server", []string{}, "The OCSP URI for this certificate. https://en.wikipedia.org/wiki/Online_Certificate_Status_Protocol")
 	certFlags.StringSliceVar(&issuingCertificateURLs, "issuing-cert-uri", []string{}, "A URI where the issuing certificate can be downloaded from")
 	certFlags.StringSliceVar(&crlDistributionPoints, "crl-distribution-point", []string{}, "A URI where a CRL can be requested")
+	certFlags.StringVar(&certificateSigningRequest, "csr", "", "The path to the certificate signing request used to generate the new certificate")
 	flags.AddFlagSet(certFlags)
 
 	certSubjectFlags := pflag.NewFlagSet("cert-subject-flags", pflag.ContinueOnError)
@@ -214,7 +235,7 @@ func init() {
 		return sb.String()
 	})
 
-	rootCmd.SetUsageTemplate(usageTemplate)
+	genCertCmd.SetUsageTemplate(usageTemplate)
 }
 
 func genCertificate(cmd *cobra.Command, args []string) error {
@@ -242,46 +263,70 @@ func genCertificate(cmd *cobra.Command, args []string) error {
 		return errors.New("Both parent-cert and parent-key should be set or neither should be set")
 	}
 
+	var csr *x509.CertificateRequest
+	if certificateSigningRequest != "" {
+		if !hasParent {
+			return errors.New("When signing a CSR, a parent is required")
+		}
+
+		csrAnsi, err := pemFileToASNI(certificateSigningRequest)
+		if err != nil {
+			return err
+		}
+
+		csr, err = x509.ParseCertificateRequest(csrAnsi)
+		if err != nil {
+			return err
+		}
+	}
+
 	keyType := strings.ToLower(keyTypeFlag)
 
 	var (
 		ecKey            *ecdsa.PrivateKey
 		rsaKey           *rsa.PrivateKey
 		encryptionCipher x509.PEMCipher
+		publicKey        crypto.PublicKey
 	)
 
-	switch strings.ToLower(keyEncryptionType) {
-	case "des":
-		encryptionCipher = x509.PEMCipherDES
-	case "3des":
-		encryptionCipher = x509.PEMCipher3DES
-	case "aes128":
-		encryptionCipher = x509.PEMCipherAES128
-	case "aes192":
-		encryptionCipher = x509.PEMCipherAES192
-	case "aes256":
-		encryptionCipher = x509.PEMCipherAES256
-	default:
-		return errors.Errorf("Unknown encryption type: %s", keyEncryptionType)
-	}
-
-	if keyType == "ec" {
-		ecKey, err = generateECPrivateKey(ecKeySize)
-		if err != nil {
-			return err
+	if csr == nil {
+		switch strings.ToLower(keyEncryptionType) {
+		case "des":
+			encryptionCipher = x509.PEMCipherDES
+		case "3des":
+			encryptionCipher = x509.PEMCipher3DES
+		case "aes128":
+			encryptionCipher = x509.PEMCipherAES128
+		case "aes192":
+			encryptionCipher = x509.PEMCipherAES192
+		case "aes256":
+			encryptionCipher = x509.PEMCipherAES256
+		default:
+			return errors.Errorf("Unknown encryption type: %s", keyEncryptionType)
 		}
 
-		if err := ecKeyToFile(keyFilename, ecKey, []byte(keyPassphrase), encryptionCipher); err != nil {
-			return err
-		}
-	} else if keyType == "rsa" {
-		rsaKey, err = generateRSAPriveKey(rsaKeySize)
+		if keyType == "ec" {
+			ecKey, err = generateECPrivateKey(ecKeySize)
+			if err != nil {
+				return err
+			}
 
-		if err := rsaKeyToFile(keyFilename, rsaKey, []byte(keyPassphrase), encryptionCipher); err != nil {
-			return err
+			if err := ecKeyToFile(keyFilename, ecKey, []byte(keyPassphrase), encryptionCipher); err != nil {
+				return err
+			}
+
+			publicKey = ecKey.Public()
+		} else if keyType == "rsa" {
+			rsaKey, err = generateRSAPriveKey(rsaKeySize)
+
+			if err := rsaKeyToFile(keyFilename, rsaKey, []byte(keyPassphrase), encryptionCipher); err != nil {
+				return err
+			}
+
+			publicKey = rsaKey.Public()
+		} else {
+			return errors.Errorf("%s is not a valid value for key-type, valid values: RSA and EC\n", keyTypeFlag)
 		}
-	} else {
-		return errors.Errorf("%s is not a valid value for key-type, valid values: RSA and EC\n", keyTypeFlag)
 	}
 
 	notBefore, err := time.Parse(dateFormat, validFrom)
@@ -358,13 +403,19 @@ func genCertificate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	var derBytes []byte
-	if keyType == "ec" {
-		derBytes, err = x509.CreateCertificate(rand.Reader, &certificateTemplate, parentCertificate, &ecKey.PublicKey, parentKey)
-	} else {
-		derBytes, err = x509.CreateCertificate(rand.Reader, &certificateTemplate, parentCertificate, rsaKey.Public(), parentKey)
+	if csr != nil {
+		certificateTemplate.Subject = csr.Subject
+		certificateTemplate.Extensions = append(certificateTemplate.Extensions, csr.Extensions...)
+		certificateTemplate.ExtraExtensions = append(certificateTemplate.ExtraExtensions, csr.ExtraExtensions...)
+		certificateTemplate.DNSNames = append(certificateTemplate.DNSNames, csr.DNSNames...)
+		certificateTemplate.EmailAddresses = append(certificateTemplate.EmailAddresses, csr.EmailAddresses...)
+		certificateTemplate.IPAddresses = append(certificateTemplate.IPAddresses, csr.IPAddresses...)
+		certificateTemplate.URIs = append(certificateTemplate.URIs, csr.URIs...)
+
+		publicKey = csr.PublicKey
 	}
 
+	derBytes, err := x509.CreateCertificate(rand.Reader, &certificateTemplate, parentCertificate, publicKey, parentKey)
 	if err != nil {
 		return err
 	}
@@ -373,6 +424,49 @@ func genCertificate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	return nil
+}
+
+var (
+	certificateInFilename string
+	csrFilename           string
+)
+
+func initGenCsr() {
+	rootCmd.AddCommand(genCsrCmd)
+
+	flags := genCsrCmd.Flags()
+
+	crsFlags := pflag.NewFlagSet("csr-flags", pflag.ContinueOnError)
+
+	crsFlags.StringVar(&certificateInFilename, "cert-input", "", "The path to the certificate for which you want to generate a certificate signing request")
+	crsFlags.StringVar(&csrFilename, "csr-output", "", "The path where the certificate signing request will be written to")
+
+	flags.AddFlagSet(crsFlags)
+
+	genCsrCmd.MarkFlagRequired("cert-input")
+}
+
+func genCertificateSigningRequest(cmd *cobra.Command, args []string) error {
+	panic("not implemented")
+
+	// cert, err := pemFileToCert(certificateInFilename)
+	// if err != nil {
+	// 	return err
+	// }
+
+	// csr := x509.CertificateRequest{
+	// 	SignatureAlgorithm: cert.SignatureAlgorithm,
+	// 	Subject:            cert.Subject,
+	// 	Extensions:         cert.Extensions,
+	// 	ExtraExtensions:    cert.ExtraExtensions,
+	// 	DNSNames:           cert.DNSNames,
+	// 	EmailAddresses:     cert.EmailAddresses,
+	// 	IPAddresses:        cert.IPAddresses,
+	// 	URIs:               cert.URIs,
+	// }
+
+	// x509.CreateCertificateRequest(rand.Reader, &csr)
 	return nil
 }
 

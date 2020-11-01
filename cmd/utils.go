@@ -86,11 +86,12 @@ func certToFile(filename string, derBytes []byte) error {
 	return nil
 }
 
-func pemFileToCert(filename string) (*x509.Certificate, error) {
+func pemFileToASNI(filename string) ([]byte, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err
 	}
+	defer file.Close()
 
 	bytes, err := ioutil.ReadAll(file)
 	if err != io.EOF && err != nil {
@@ -102,12 +103,17 @@ func pemFileToCert(filename string) (*x509.Certificate, error) {
 		return nil, errors.New("Can't read PEM data")
 	}
 
-	cert, err := x509.ParseCertificate(block.Bytes)
+	return block.Bytes, nil
+}
+
+func pemFileToCert(filename string) (*x509.Certificate, error) {
+	ansi, err := pemFileToASNI(filename)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := file.Close(); err != nil {
+	cert, err := x509.ParseCertificate(ansi)
+	if err != nil {
 		return nil, err
 	}
 
