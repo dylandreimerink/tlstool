@@ -10,9 +10,10 @@ mkdir -p release
 
 rm -f release/*
 
-CGO_ENABLED=0 gox \
+gox \
     -osarch="!darwin/386" \
     -ldflags "-X main.TlsToolVersion='$VERSION' \
     -X main.TlsToolCommitHash='$GIT_COMMIT' \
     -X main.TlsToolGolangBuildVersion='$GOLANG_VERSION'" \
-    -output="release/{{.Dir}}_$VERSION_{{.OS}}_{{.Arch}}" 
+    -tags "netgo" \
+    -output="release/{{.Dir}}_$VERSION_{{.OS}}_{{.Arch}}"

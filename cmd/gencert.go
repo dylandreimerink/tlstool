@@ -87,7 +87,7 @@ func (gcc *generateCertificateCommand) GetCobraCommand() *cobra.Command {
 	flags.StringVar(&gcc.ParentCertificate, "parent-certificate", "", "The path to the certificate which will sign this new certificate")
 	flags.StringVar(&gcc.ParentPrivateKey, "parent-private-key", "", "The path to the private key of the parent certificate")
 	flags.StringVar(&gcc.ParentPrivateKeyPassword, "parent-private-key-password", "", "The password (if any) of the private key of the parent certificate")
-	flags.StringVarP(&gcc.Preset, "preset", "p", "server-leaf-certificate", "The preset to use, sane defaults per certificate type.\n"+
+	flags.StringVarP(&gcc.Preset, "preset", "p", "", "The preset to use, sane defaults per certificate type.\n"+
 		"Allowed values: (\n"+
 		"\t'none' - No default values, all up to you\n"+
 		"\t'server-leaf-certificate' - Leaf certificate for use as a server certificate\n"+
@@ -159,7 +159,7 @@ func (gcc *generateCertificateCommand) checkFlags(command *cobra.Command) error 
 		panic(err)
 	}
 
-	err = gcc.setPreset(command)
+	err = gcc.setPreset(nonInteractive, command)
 	if err != nil {
 		return err
 	}
@@ -192,13 +192,169 @@ func (gcc *generateCertificateCommand) checkFlags(command *cobra.Command) error 
 		return err
 	}
 
-	// TODO check subject flags
+	if err = gcc.checkFlagsSubject(nonInteractive); err != nil {
+		return err
+	}
 
 	if err = gcc.checkFlagSerialNumber(nonInteractive); err != nil {
 		return err
 	}
 
 	// TODO check SAN flags
+
+	return nil
+}
+
+func (gcc *generateCertificateCommand) checkFlagsSubject(nonInteractiveFlag bool) error {
+	subjectCount := len(gcc.Subject.Country) +
+		len(gcc.Subject.Organization) +
+		len(gcc.Subject.OrganizationalUnit) +
+		len(gcc.Subject.Locality) +
+		len(gcc.Subject.Province) +
+		len(gcc.Subject.StreetAddress) +
+		len(gcc.Subject.PostalCode)
+
+	// is at least one subject flag is set?
+	subjectFlagSet := gcc.Subject.CommonName != "" ||
+		gcc.Subject.SerialNumber != "" ||
+		subjectCount > 0
+
+	// If nonInteractive mode, don't prompt
+	if nonInteractiveFlag {
+		if !subjectFlagSet {
+			// TODO warn user if no subject flags are set
+		}
+
+		return nil
+	}
+
+	var wantSubject bool
+	err := survey.AskOne(&survey.Confirm{
+		Message: "Do you want to set a subject?",
+		Default: !subjectFlagSet,
+	}, &wantSubject,
+		survey.WithValidator(survey.Required),
+	)
+	if err != nil {
+		return err
+	}
+	if !wantSubject {
+		return nil
+	}
+
+	splitStr := func(ans string) []string {
+		if strings.TrimSpace(ans) == "" {
+			return nil
+		}
+
+		split := strings.Split(ans, ",")
+		for i, str := range split {
+			split[i] = strings.TrimSpace(str)
+		}
+		return split
+	}
+
+	qs := []*survey.Question{
+		&survey.Question{
+			Name: "CommonName",
+			Prompt: &survey.Input{
+				Message: "Common name:",
+				Default: gcc.Subject.CommonName,
+			},
+		},
+		&survey.Question{
+			Name: "Organization",
+			Prompt: &survey.Input{
+				Message: "Organization:",
+				Default: strings.Join(gcc.Subject.Organization, ","),
+				Help:    "Comma seperated list",
+			},
+		},
+		&survey.Question{
+			Name: "OrganizationalUnit",
+			Prompt: &survey.Input{
+				Message: "Organizational unit:",
+				Default: strings.Join(gcc.Subject.OrganizationalUnit, ","),
+				Help:    "Comma seperated list",
+			},
+		},
+		&survey.Question{
+			Name: "Country",
+			Prompt: &survey.Input{
+				Message: "Country:",
+				Default: strings.Join(gcc.Subject.Country, ","),
+				Help:    "Comma seperated list",
+			},
+		},
+		&survey.Question{
+			Name: "Province",
+			Prompt: &survey.Input{
+				Message: "Province:",
+				Default: strings.Join(gcc.Subject.Province, ","),
+				Help:    "Comma seperated list",
+			},
+		},
+		&survey.Question{
+			Name: "Locality",
+			Prompt: &survey.Input{
+				Message: "Locality:",
+				Default: strings.Join(gcc.Subject.Locality, ","),
+				Help:    "Comma seperated list",
+			},
+		},
+		&survey.Question{
+			Name: "PostalCode",
+			Prompt: &survey.Input{
+				Message: "Postal code:",
+				Default: strings.Join(gcc.Subject.PostalCode, ","),
+				Help:    "Comma seperated list",
+			},
+		},
+		&survey.Question{
+			Name: "StreetAddress",
+			Prompt: &survey.Input{
+				Message: "Street address:",
+				Default: strings.Join(gcc.Subject.StreetAddress, ","),
+				Help:    "Comma seperated list",
+			},
+		},
+		&survey.Question{
+			Name: "SerialNumber",
+			Prompt: &survey.Input{
+				Message: "Serial number:",
+				Default: gcc.Subject.SerialNumber,
+			},
+		},
+	}
+
+	answers := struct {
+		CommonName         string
+		Organization       string
+		OrganizationalUnit string
+		Country            string
+		Province           string
+		Locality           string
+		PostalCode         string
+		StreetAddress      string
+		SerialNumber       string
+	}{}
+
+	err = survey.Ask(qs, &answers)
+	if err != nil {
+		return err
+	}
+
+	gcc.Subject = pkix.Name{
+		CommonName:         answers.CommonName,
+		Organization:       splitStr(answers.Organization),
+		OrganizationalUnit: splitStr(answers.OrganizationalUnit),
+		Country:            splitStr(answers.Country),
+		Province:           splitStr(answers.Province),
+		Locality:           splitStr(answers.Locality),
+		PostalCode:         splitStr(answers.PostalCode),
+		StreetAddress:      splitStr(answers.StreetAddress),
+		SerialNumber:       answers.SerialNumber,
+	}
 
 	return nil
 }
@@ -751,8 +907,27 @@ func (gcc *generateCertificateCommand) checkFlagMaxCAPath(nonInteractive bool) e
 	return nil
 }
 
-func (gcc *generateCertificateCommand) setPreset(command *cobra.Command) error {
-	// TODO prompt preset
+func (gcc *generateCertificateCommand) setPreset(nonInteractive bool, command *cobra.Command) error {
+	if gcc.Preset == "" {
+		if nonInteractive {
+			gcc.Preset = "none"
+		} else {
+			err := survey.AskOne(&survey.Select{
+				Message: "Certificate preset:",
+				Default: "server-leaf-certificate",
+				Options: []string{
+					"none",
+					"server-leaf-certificate",
+					"client-leaf-certificate",
+					"root-ca",
+					"intermediate-ca",
+				},
+			}, &gcc.Preset, survey.WithValidator(survey.Required))
+			if err != nil {
+				return err
+			}
+		}
+	}
 
 	switch gcc.Preset {
 	case "none":
@@ -792,28 +967,28 @@ func (gcc *generateCertificateCommand) setPreset(command *cobra.Command) error {
 	case "root-ca":
 		// TODO, throw warning if values will produce a incorrect certificate for the preset
 		if len(gcc.KeyUsage) == 0 {
-			gcc.KeyUsage = []string{"digital-signature", "cert-sign", "crl-sign"}
+			gcc.KeyUsage = []string{"cert-sign", "crl-sign"}
 		}
 
 		if gcc.NotAfter == "" && gcc.ValidFor == 0 {
 			gcc.ValidFor = 5 * 365 * 24 * time.Hour
 		}
 
-		// TODO, throw warning if is-ca is true
+		// TODO, throw warning if is-ca is false
 		if !command.Flags().Changed("is-ca") {
 			gcc.IsCA = true
 		}
 	case "intermediate-ca":
 		// TODO, throw warning if values will produce a incorrect certificate for the preset
 		if len(gcc.KeyUsage) == 0 {
-			gcc.KeyUsage = []string{"digital-signature", "cert-sign", "crl-sign"}
+			gcc.KeyUsage = []string{"cert-sign", "crl-sign"}
 		}
 
 		if gcc.NotAfter == "" && gcc.ValidFor == 0 {
 			gcc.ValidFor = 3 * 365 * 24 * time.Hour
 		}
 
-		// TODO, throw warning if is-ca is true
+		// TODO, throw warning if is-ca is false
 		if !command.Flags().Changed("is-ca") {
 			gcc.IsCA = true
 		}
@@ -855,7 +1030,7 @@ func (gcc *generateCertificateCommand) Run(command *cobra.Command, args []string
 
 	var keyUsage x509.KeyUsage
 	for _, usage := range gcc.KeyUsage {
-		keyUsage = keyUsage & keyUsageTranslation[usage]
+		keyUsage |= keyUsageTranslation[usage]
 	}
 
 	var extKeyUsage []x509.ExtKeyUsage
@@ -892,9 +1067,10 @@ func (gcc *generateCertificateCommand) Run(command *cobra.Command, args []string
 
 		SerialNumber: serialNumber,
 
-		IsCA:           gcc.IsCA,
-		MaxPathLen:     gcc.MaxPathLength,
-		MaxPathLenZero: gcc.MaxPathLength == 0,
+		BasicConstraintsValid: gcc.IsCA,
+		IsCA:                  gcc.IsCA,
+		MaxPathLen:            gcc.MaxPathLength,
+		MaxPathLenZero:        gcc.MaxPathLength == 0,
 
 		NotAfter:  notAfter,
 		NotBefore: notBefore,
