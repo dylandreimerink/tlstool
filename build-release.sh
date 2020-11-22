@@ -12,8 +12,8 @@ rm -f release/*
 
 gox \
     -osarch="!darwin/386" \
-    -ldflags "-X main.TlsToolVersion='$VERSION' \
-    -X main.TlsToolCommitHash='$GIT_COMMIT' \
-    -X main.TlsToolGolangBuildVersion='$GOLANG_VERSION'" \
+    -ldflags "-X main.TlsToolVersion=$VERSION \
+    -X main.TlsToolCommitHash=$GIT_COMMIT \
+    -X main.TlsToolGolangBuildVersion=$GOLANG_VERSION" \
     -tags "netgo" \
     -output="release/{{.Dir}}_$VERSION_{{.OS}}_{{.Arch}}"

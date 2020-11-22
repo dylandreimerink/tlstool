@@ -22,6 +22,8 @@ func newGenCertCmd() *cobra.Command {
 	return genCertCmd.GetCobraCommand()
 }
 
+// generateCertificateCommand holds all variables that can be specified with flags.
+// If variables are not set, users will have the opportunity to set them interactively.
 type generateCertificateCommand struct {
 	// The path where the certificate will be written to
 	OutputPath string
@@ -60,16 +62,23 @@ type generateCertificateCommand struct {
 	// The subject of the certifcate
 	Subject pkix.Name
 
+	// The serial number of the certificate (different from the subject serial number)
 	SerialNumber int64
 
-	IPAddresses    []net.IP
+	// SAN(Subject alternative name) IP's
+	IPAddresses []net.IP
+	// SAN(Subject alternative name) Email addresses
 	EmailAddresses []string
-	DomainNames    []string
-	URIs           []string
+	// SAN(Subject alternative name) Domain names
+	DomainNames []string
+	// SAN(Subject alternative name) URI's
+	URIs []string
 }
 
+// The format to be used for dates. hh-ss-mm dd-mm-yyyy
 const dateFormat = "15:04:05 02-01-2006"
 
+// GetCobraCommand builds and returns the actual cobra command
 func (gcc *generateCertificateCommand) GetCobraCommand() *cobra.Command {
 	cobraCommand := &cobra.Command{
 		Use: "cert",
@@ -129,7 +138,7 @@ func (gcc *generateCertificateCommand) GetCobraCommand() *cobra.Command {
 	flags.BoolVar(&gcc.IsCA, "is-ca", false, "This certificate may be used as a CA")
 	flags.IntVar(&gcc.MaxPathLength, "max-path-length", -1, "The maximum length of the certificate chain below this certificate")
 
-	// TODO add remaining extension fields (OCSP, Issuing URI, CRL)
+	// TODO add ability to use custom extensions so knowledgeable can add: OCSP, Issuing URI, CRL, ect.
 
 	flags.Int64Var(&gcc.SerialNumber, "serial-number", -1, "The serial number of the certificate, random by default")
 
@@ -145,6 +154,8 @@ func (gcc *generateCertificateCommand) GetCobraCommand() *cobra.Command {
 
 	//TODO add custom OID option for subject
 
+	//TODO Name constraints
+
 	flags.IPSliceVar(&gcc.IPAddresses, "san-ip", []net.IP{}, "Subject alternative name - IP addresses allowed to use the generated certificate")
 	flags.StringSliceVar(&gcc.EmailAddresses, "san-email", []string{}, "Subject alternative name - email addresses allowed to use the generated certificate")
 	flags.StringSliceVar(&gcc.DomainNames, "san-domain", []string{}, "Subject alternative name - domain names allowed to use the generated certificate")
@@ -158,6 +169,8 @@ func (gcc *generateCertificateCommand) checkFlags(command *cobra.Command) error 
 	if err != nil {
 		panic(err)
 	}
+
+	//TODO in general, add more help texts to prompts
 
 	err = gcc.setPreset(nonInteractive, command)
 	if err != nil {
@@ -192,7 +205,7 @@ func (gcc *generateCertificateCommand) checkFlags(command *cobra.Command) error 
 		return err
 	}
 
-	if err = gcc.checkFlagsSubject(nonInteractive); err != nil {
+	if err = gcc.checkSubjectFlags(nonInteractive); err != nil {
 		return err
 	}
 
@@ -200,12 +213,123 @@ func (gcc *generateCertificateCommand) checkFlags(command *cobra.Command) error 
 		return err
 	}
 
-	// TODO check SAN flags
+	if err = gcc.checkSANFlags(nonInteractive); err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func (gcc *generateCertificateCommand) checkFlagsSubject(nonInteractiveFlag bool) error {
+// checkSANFlags checks all existing SAN flags or prompts for input
+func (gcc *generateCertificateCommand) checkSANFlags(nonInteractiveFlag bool) error {
+	//TODO validate SAN agains RFC 5280, 4.1.2.6
+
+	if nonInteractiveFlag {
+		return nil
+	}
+
+	sanFlagsSet := len(gcc.IPAddresses)+
+		len(gcc.EmailAddresses)+
+		len(gcc.DomainNames)+
+		len(gcc.URIs) > 0
+
+	var wantSAN bool
+	err := survey.AskOne(&survey.Confirm{
+		Message: "Do you want to set subject alternative name?",
+		Default: !sanFlagsSet,
+	}, &wantSAN,
+		survey.WithValidator(survey.Required),
+	)
+	if err != nil {
+		return err
+	}
+	if !wantSAN {
+		return nil
+	}
+
+	// TODO move to separate fuction for reuse
+	splitStr := func(ans string) []string {
+		if strings.TrimSpace(ans) == "" {
+			return nil
+		}
+
+		split := strings.Split(ans, ",")
+		for i, str := range split {
+			split[i] = strings.TrimSpace(str)
+		}
+		return split
+	}
+
+	ipsToString := func(ips []net.IP) []string {
+		strings := make([]string, len(ips))
+		for i, ip := range ips {
+			strings[i] = ip.String()
+		}
+		return strings
+	}
+
+	qs := []*survey.Question{
+		&survey.Question{
+			Name: "IPAddresses",
+			Prompt: &survey.Input{
+				Message: "IP addresses:",
+				Default: strings.Join(ipsToString(gcc.IPAddresses), ","),
+				Help:    "Comma seperated list",
+				//TODO add SAN validation
+			},
+		},
+		&survey.Question{
+			Name: "EmailAddresses",
+			Prompt: &survey.Input{
+				Message: "Email addresses:",
+				Default: strings.Join(gcc.EmailAddresses, ","),
+				Help:    "Comma seperated list",
+				//TODO add SAN validation
+			},
+		},
+		&survey.Question{
+			Name: "DomainNames",
+			Prompt: &survey.Input{
+				Message: "Domain names:",
+				Default: strings.Join(gcc.DomainNames, ","),
+				Help:    "Comma seperated list",
+				//TODO add SAN validation
+			},
+		},
+		&survey.Question{
+			Name: "URIs",
+			Prompt: &survey.Input{
+				Message: "URIs:",
+				Default: strings.Join(gcc.URIs, ","),
+				Help:    "Comma seperated list",
+				//TODO add SAN validation
+			},
+		},
+	}
+
+	answers := struct {
+		IPAddresses    string
+		EmailAddresses string
+		DomainNames    string
+		URIs           string
+	}{}
+
+	err = survey.Ask(qs, &answers)
+	if err != nil {
+		return err
+	}
+
+	for _, ip := range splitStr(answers.IPAddresses) {
+		gcc.IPAddresses = append(gcc.IPAddresses, net.ParseIP(ip))
+	}
+	gcc.EmailAddresses = splitStr(answers.EmailAddresses)
+	gcc.DomainNames = splitStr(answers.DomainNames)
+	gcc.URIs = splitStr(answers.URIs)
+
+	return nil
+}
+
+func (gcc *generateCertificateCommand) checkSubjectFlags(nonInteractiveFlag bool) error {
 	subjectCount := len(gcc.Subject.Country) +
 		len(gcc.Subject.Organization) +
 		len(gcc.Subject.OrganizationalUnit) +
@@ -321,7 +445,7 @@ func (gcc *generateCertificateCommand) checkFlagsSubject(nonInteractiveFlag bool
 		&survey.Question{
 			Name: "SerialNumber",
 			Prompt: &survey.Input{
-				Message: "Serial number:",
+				Message: "Subject serial number:",
 				Default: gcc.Subject.SerialNumber,
 			},
 		},
@@ -820,6 +944,7 @@ var (
 )
 
 func (gcc *generateCertificateCommand) checkFlagExtendedKeyUsage(nonInteractive bool) error {
+	//TODO make custom extended key usage OID's actually work
 	const customExtKeyOID = "custom extended key usage OID"
 
 	validExtKeyUsage := make([]string, 0, len(extendedKeyUsageStrings)+1)
