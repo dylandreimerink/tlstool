@@ -680,7 +680,7 @@ func (gcc *generateCertificateCommand) privateKeyPasswordValidator(val interface
 func (gcc *generateCertificateCommand) checkFlagParent(nonInteractiveFlag bool) error {
 	certSet := gcc.ParentCertificate != ""
 	keySet := gcc.ParentPrivateKey != ""
-	passwordSet := gcc.PrivateKeyPassword != ""
+	passwordSet := gcc.ParentPrivateKeyPassword != ""
 
 	// If all paths are set, all is good.
 	if certSet && keySet && passwordSet {
@@ -755,12 +755,7 @@ func (gcc *generateCertificateCommand) checkFlagParent(nonInteractiveFlag bool) 
 			}
 		}
 
-		if !passwordSet {
-			if nonInteractiveFlag {
-				return fmt.Errorf("The --parent-private-key-password flag must be set if " +
-					"the --parent-certificate or --parent-private-key flags are set")
-			}
-
+		if !passwordSet && !nonInteractiveFlag {
 			if err := askPassword(); err != nil {
 				return err
 			}
@@ -865,7 +860,7 @@ var (
 		"encipher-only",
 		"decipher-only",
 	}
-	keyUsageTranslation = map[string]x509.KeyUsage{
+	stringToKeyUsage = map[string]x509.KeyUsage{
 		keyUsageStrings[0]: x509.KeyUsageDigitalSignature,
 		keyUsageStrings[1]: x509.KeyUsageContentCommitment,
 		keyUsageStrings[2]: x509.KeyUsageKeyEncipherment,
@@ -880,7 +875,9 @@ var (
 func (gcc *generateCertificateCommand) checkFlagKeyUsage(nonInteractive bool) error {
 	if len(gcc.KeyUsage) == 0 {
 		if nonInteractive {
-			return fmt.Errorf("At least one --key-usage flag must be set")
+			// TODO Make a warning message
+			// return fmt.Errorf("At least one --key-usage flag must be set")
+			return nil
 		}
 
 		fmt.Println("No key usage specified")
@@ -895,7 +892,7 @@ func (gcc *generateCertificateCommand) checkFlagKeyUsage(nonInteractive bool) er
 
 	} else {
 		for _, keyUsage := range gcc.KeyUsage {
-			if _, found := keyUsageTranslation[keyUsage]; !found {
+			if _, found := stringToKeyUsage[keyUsage]; !found {
 				return fmt.Errorf("'%s', is not a valid value for the --key-usage flag", keyUsage)
 			}
 		}
@@ -933,7 +930,7 @@ var (
 		"time-stamping",
 		"ocsp-signing",
 	}
-	extendedKeyUsageTranslation = map[string]x509.ExtKeyUsage{
+	stringToExtendedKeyUsage = map[string]x509.ExtKeyUsage{
 		extendedKeyUsageStrings[0]: x509.ExtKeyUsageAny,
 		extendedKeyUsageStrings[1]: x509.ExtKeyUsageServerAuth,
 		extendedKeyUsageStrings[2]: x509.ExtKeyUsageClientAuth,
@@ -953,7 +950,7 @@ func (gcc *generateCertificateCommand) checkFlagExtendedKeyUsage(nonInteractive 
 
 	if len(gcc.ExtendedKeyUsage) != 0 {
 		for _, extKeyUsage := range gcc.ExtendedKeyUsage {
-			if _, found := extendedKeyUsageTranslation[extKeyUsage]; !found {
+			if _, found := stringToExtendedKeyUsage[extKeyUsage]; !found {
 				return fmt.Errorf("'%s', is not a valid value for the --ext-key-usage flag", extKeyUsage)
 			}
 		}
@@ -1138,9 +1135,14 @@ func (gcc *generateCertificateCommand) Run(command *cobra.Command, args []string
 		return err
 	}
 
+	notBefore, err := time.Parse(dateFormat, gcc.NotBefore)
+	if err != nil {
+		return err
+	}
+
 	var notAfter time.Time
 	if gcc.NotAfter == "" {
-		notAfter = time.Now().Add(gcc.ValidFor)
+		notAfter = notBefore.Add(gcc.ValidFor)
 	} else {
 		notAfter, err = time.Parse(dateFormat, gcc.NotAfter)
 		if err != nil {
@@ -1148,19 +1150,14 @@ func (gcc *generateCertificateCommand) Run(command *cobra.Command, args []string
 		}
 	}
 
-	notBefore, err := time.Parse(dateFormat, gcc.NotBefore)
-	if err != nil {
-		return err
-	}
-
 	var keyUsage x509.KeyUsage
 	for _, usage := range gcc.KeyUsage {
-		keyUsage |= keyUsageTranslation[usage]
+		keyUsage |= stringToKeyUsage[usage]
 	}
 
 	var extKeyUsage []x509.ExtKeyUsage
 	for _, usage := range gcc.ExtendedKeyUsage {
-		extKeyUsage = append(extKeyUsage, extendedKeyUsageTranslation[usage])
+		extKeyUsage = append(extKeyUsage, stringToExtendedKeyUsage[usage])
 	}
 
 	var uris []*url.URL

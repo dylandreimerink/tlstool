@@ -177,6 +177,8 @@ This a list of features or tasks to be added to the project. Sort of a lose back
 * [ ] Mistake warnings (generating certificates without common names for example)
 * [ ] CSR generation (creating new ones and converting existing certificates)
 * [ ] CSR signing
-* [ ] Inspection command (Showing the human readable certificate, private key, or CSR)
+* [X] Inspection command (Showing the human readable certificate, private key, or CSR)
+  * Add CSR support to show command
+  * Add support for unparsed extentions to show command
 * [ ] Format converter (From PEM to DER, Bundle certs in a chain, Unpack/repack pkcs12 archives, ect.)
 * [ ] Distribution via package managers

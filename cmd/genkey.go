@@ -96,6 +96,12 @@ func (gpk *generatePrivateKeyCommand) checkFlagKeyPassphrase(nonInteractive bool
 		return nil
 	}
 
+	// Only PEM formated keys can be encrypted (Not DER)
+	// TODO Check if we want to support encrypted PKCS#8 keys(EncryptedPrivateKeyInfo) which are not PEM...
+	if gpk.KeyFormat != "PEM" {
+		return nil
+	}
+
 	fmt.Println("No passphrase specified, input one or just press enter to leave key unencrypted")
 
 	err := survey.AskOne(&survey.Password{
